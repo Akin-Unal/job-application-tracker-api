@@ -1,7 +1,7 @@
 [project]
 name = "job-application-tracker-api"
-version = "0.1.0"
-description = "Reusable production-style FastAPI backend template."
+version = "1.0.0"
+description = "Production-style job application tracking REST API."
 readme = "README.md"
 requires-python = ">=3.12"
 

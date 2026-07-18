@@ -1,355 +1,613 @@
 # Job Application Tracker API
 
-A reusable, production-style FastAPI backend foundation for portfolio and real-world API projects. It is designed to be copied, renamed, and extended into projects such as support ticket systems, uptime monitors, job application trackers, document managers, and inventory APIs.
+A production-style job application tracking REST API built with FastAPI, PostgreSQL,
+SQLAlchemy, Docker, JWT authentication and pytest.
 
-This template includes authentication, user management, migrations, tests, Docker support, CI, linting, formatting, type checking, and helper scripts. It is intentionally practical rather than enterprise-heavy, so a junior-to-mid-level developer can understand and adapt it.
+Job Application Tracker API gives candidates one secure place to organize companies,
+recruiting contacts, applications, interviews, notes, lifecycle history, and job-search
+analytics. It is a backend portfolio project focused on practical REST design, relational
+modeling, authorization, workflow rules, testing, and production-minded tooling.
 
-## Features
+> No public live demo is currently deployed. The project runs locally or with Docker Compose.
 
-- Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2.x, Alembic
-- PostgreSQL for local and Docker development
-- Isolated SQLite test database for pytest and CI
-- JWT bearer authentication with password hashing
-- Registration, login, current-user, admin-only, and active-user dependencies
-- User CRUD-style management with soft deletion
-- Reusable repository and service layers
-- Consistent application error responses
-- Pagination helpers and paginated user listing
-- Structured standard-library logging
-- Swagger at `/docs` and ReDoc at `/redoc`
-- Dockerfile, Docker Compose, GitHub Actions, Ruff, mypy, pytest
-- Cross-platform project copy script
+## Problem solved
 
-This is a strong starter template, not a complete production security program. Before using it for real production traffic, add infrastructure hardening, secrets management, rate limiting, monitoring, backups, TLS, and a security review.
+Job searches quickly spread across bookmarks, inboxes, calendars, and spreadsheets. That makes
+it difficult to answer basic questions: Which applications need attention? What interview is
+next? How often do applications receive a response? This API models that information as a
+permission-aware pipeline with immutable status history and useful aggregate metrics.
+
+## Main features
+
+- JWT registration, login, current-user access, and Swagger authorization
+- Normal-user and administrator roles
+- Owner-scoped companies, contacts, applications, interviews, and private notes
+- Validated application lifecycle with automatic timestamps and status history
+- Filtering, full-text-style search, sorting, and pagination
+- Upcoming interview tracking and interview outcome states
+- User-scoped and administrator-level application statistics
+- SQLAlchemy 2.x repository and service layers
+- PostgreSQL migrations with Alembic
+- Isolated SQLite integration tests for fast local and CI execution
+- Structured error responses that do not expose database details
+- Docker Compose and GitHub Actions CI
+- Ruff formatting/linting and strict mypy checks
 
 ## Architecture
 
-Routes handle HTTP input and output. Services own business rules. Repositories own database queries. Schemas validate request and response data. Models define database entities.
+The project uses a deliberately small layered architecture:
 
 ```text
-job-application-tracker-api/
+HTTP request
+  -> FastAPI route (input parsing and dependencies)
+  -> service (authorization, ownership, workflow, timestamps)
+  -> repository (queries, filtering, persistence, analytics)
+  -> SQLAlchemy session
+  -> PostgreSQL
+```
+
+Routes remain thin. Services are the security and business-rule boundary. Repositories own
+database access, pagination, search, eager loading, history retrieval, and aggregate queries.
+Application exceptions are converted to one stable JSON error envelope.
+
+## Technology stack
+
+| Area | Technology |
+|---|---|
+| API | Python 3.12, FastAPI, Uvicorn |
+| Validation | Pydantic v2 |
+| Persistence | PostgreSQL 16, SQLAlchemy 2.x, psycopg |
+| Migrations | Alembic |
+| Authentication | JWT bearer tokens, Argon2 password hashing |
+| Testing | pytest, FastAPI TestClient, isolated SQLite database |
+| Quality | Ruff, mypy |
+| Delivery | Docker, Docker Compose, GitHub Actions |
+
+## Database entities
+
+- `users`: credentials, profile, role, and active state
+- `companies`: owner-scoped employers with industry and location metadata
+- `contacts`: recruiters, hiring managers, and referrals belonging to companies
+- `job_applications`: position details, pipeline state, dates, compensation, and priority
+- `application_status_history`: immutable creation and transition records
+- `interviews`: scheduling, type, participant, location/link, and outcome
+- `application_notes`: trimmed private notes attached to applications
+
+```mermaid
+erDiagram
+    USER ||--o{ COMPANY : creates
+    USER ||--o{ CONTACT : creates
+    USER ||--o{ JOB_APPLICATION : creates
+    USER ||--o{ INTERVIEW : creates
+    USER ||--o{ APPLICATION_NOTE : authors
+    USER ||--o{ APPLICATION_STATUS_HISTORY : changes
+    COMPANY ||--o{ CONTACT : has
+    COMPANY ||--o{ JOB_APPLICATION : receives
+    JOB_APPLICATION ||--o{ APPLICATION_STATUS_HISTORY : records
+    JOB_APPLICATION ||--o{ INTERVIEW : schedules
+    JOB_APPLICATION ||--o{ APPLICATION_NOTE : contains
+
+    USER {
+        uuid id PK
+        string email UK
+        string full_name
+        enum role
+        boolean is_active
+    }
+    COMPANY {
+        uuid id PK
+        uuid created_by_id FK
+        string name
+        string industry
+        string location
+    }
+    CONTACT {
+        uuid id PK
+        uuid company_id FK
+        uuid created_by_id FK
+        string full_name
+        string email
+    }
+    JOB_APPLICATION {
+        uuid id PK
+        uuid company_id FK
+        uuid created_by_id FK
+        string position_title
+        enum status
+        enum priority
+        datetime applied_at
+        datetime archived_at
+    }
+    APPLICATION_STATUS_HISTORY {
+        uuid id PK
+        uuid application_id FK
+        uuid changed_by_id FK
+        enum old_status
+        enum new_status
+        datetime created_at
+    }
+    INTERVIEW {
+        uuid id PK
+        uuid application_id FK
+        uuid created_by_id FK
+        enum interview_type
+        datetime scheduled_at
+        enum status
+    }
+    APPLICATION_NOTE {
+        uuid id PK
+        uuid application_id FK
+        uuid author_id FK
+        text content
+        boolean is_private
+    }
+```
+
+Company names are unique per owner. Foreign-key indexes and common application filter indexes
+are included in the domain migration.
+
+## Application lifecycle
+
+Every application starts as `DRAFT` unless an initial status is explicitly supplied. Creation
+automatically produces a history row with a null old status. Every later status change is
+validated by the service and creates exactly one additional history row.
+
+- Entering `APPLIED` sets `applied_at` when it is not already set.
+- Meaningful application, interview, or note activity updates `last_activity_at`.
+- Entering `ARCHIVED` sets `archived_at`.
+- Reopening an archived application clears `archived_at`.
+- Route handlers never write status-history records directly.
+
+## Status workflow
+
+```mermaid
+flowchart LR
+    DRAFT --> APPLIED
+    DRAFT --> WITHDRAWN
+    APPLIED --> HR_SCREEN
+    APPLIED --> REJECTED
+    APPLIED --> WITHDRAWN
+    HR_SCREEN --> TECHNICAL_INTERVIEW
+    HR_SCREEN --> REJECTED
+    HR_SCREEN --> WITHDRAWN
+    TECHNICAL_INTERVIEW --> FINAL_INTERVIEW
+    TECHNICAL_INTERVIEW --> REJECTED
+    TECHNICAL_INTERVIEW --> WITHDRAWN
+    FINAL_INTERVIEW --> OFFER
+    FINAL_INTERVIEW --> REJECTED
+    FINAL_INTERVIEW --> WITHDRAWN
+    OFFER --> ARCHIVED
+    OFFER --> WITHDRAWN
+    REJECTED --> ARCHIVED
+    WITHDRAWN --> ARCHIVED
+    ARCHIVED --> APPLIED
+```
+
+An invalid transition returns HTTP `422` with code
+`INVALID_APPLICATION_STATUS_TRANSITION`.
+
+## Authorization rules
+
+Normal users can manage only companies and applications they own, plus nested contacts,
+interviews, history, and notes belonging to those records. Owner IDs are derived from the JWT;
+clients cannot assign them. Passing another user's `created_by_id` does not bypass list
+isolation.
+
+Administrators can view and manage all domain records, view global statistics, and use
+`created_by_id` filters. Registration always creates a normal user; administrator accounts are
+created through the local CLI.
+
+Company deletion is a permanent delete because the inherited template has no generic soft-delete
+facility and the specified Company model has no archive timestamp. Database cascades remove its
+dependent contacts and applications. Application archival is a workflow transition and is not
+a physical delete.
+
+## Folder structure
+
+```text
+.
+├── alembic/
+│   └── versions/
 ├── app/
 │   ├── api/
 │   │   ├── dependencies/
-│   │   │   ├── auth.py
-│   │   │   └── database.py
-│   │   ├── routes/
-│   │   │   ├── auth.py
-│   │   │   ├── health.py
-│   │   │   └── users.py
-│   │   └── router.py
+│   │   └── routes/
 │   ├── core/
-│   │   ├── config.py
-│   │   ├── exceptions.py
-│   │   ├── logging.py
-│   │   └── security.py
 │   ├── database/
-│   │   ├── base.py
-│   │   ├── models.py
-│   │   └── session.py
 │   ├── models/
-│   │   ├── base.py
-│   │   └── user.py
 │   ├── repositories/
-│   │   ├── base.py
-│   │   └── user_repository.py
 │   ├── schemas/
-│   │   ├── auth.py
-│   │   ├── common.py
-│   │   └── user.py
 │   ├── services/
-│   │   ├── auth_service.py
-│   │   └── user_service.py
 │   ├── utils/
-│   │   └── pagination.py
 │   └── main.py
-├── alembic/
+├── docs/images/
 ├── scripts/
 ├── tests/
-├── .github/workflows/ci.yml
-├── .env.example
+│   ├── integration/
+│   └── unit/
 ├── docker-compose.yml
 ├── Dockerfile
-├── Makefile
-├── pyproject.toml
-└── requirements.txt
+└── pyproject.toml
 ```
 
-## Technology Stack
+## Local installation
+
+Requirements:
 
 - Python 3.12
-- FastAPI
-- PostgreSQL
-- SQLAlchemy 2.x
-- Alembic
-- Pydantic v2 and pydantic-settings
-- PyJWT
-- pwdlib with Argon2
-- Pytest and HTTPX
-- Docker and Docker Compose
-- GitHub Actions
-- Ruff and mypy
-
-## Requirements
-
-- Python 3.12+
-- PostgreSQL 14+ for local database development
-- Docker Desktop if using Docker Compose
+- PostgreSQL 16 or a compatible recent version
 - Git
-
-Make is optional. Windows PowerShell commands are documented below.
-
-## Local Installation
-
-PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-macOS/Linux:
+- Optional: Docker Desktop
 
 ```bash
+git clone <repository-url>
+cd job-application-tracker-api
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-## Environment Configuration
+Replace `<repository-url>` with this repository's actual clone URL.
 
-Edit `.env` after copying `.env.example`.
-
-```env
-APP_NAME=Job Application Tracker API
-APP_ENV=development
-DEBUG=true
-API_V1_PREFIX=/api/v1
-
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/job_application_tracker_api_db
-
-JWT_SECRET_KEY=change-this-secret
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-```
-
-Use a long random `JWT_SECRET_KEY` outside local development. Do not commit `.env`.
-
-## Database Setup
-
-Create a PostgreSQL database named `job_application_tracker_api_db`, or adjust `DATABASE_URL` to match your local database.
-
-PowerShell example with Docker only for PostgreSQL:
+## PowerShell setup (Windows 11)
 
 ```powershell
-docker run --name fastapi-template-postgres `
-  -e POSTGRES_USER=postgres `
-  -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_DB=job_application_tracker_api_db `
-  -p 5432:5432 `
-  -d postgres:16-alpine
+git clone <repository-url>
+Set-Location job-application-tracker-api
+py -3.12 -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-## Running Migrations
+If activation is restricted by organization policy, call the environment executable directly:
 
 ```powershell
-alembic upgrade head
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Create a new migration:
+## Environment variables
+
+| Variable | Purpose | Local example |
+|---|---|---|
+| `APP_NAME` | Log/display name | `Job Application Tracker API` |
+| `APP_ENV` | Environment name | `development` |
+| `DEBUG` | FastAPI debug behavior | `true` |
+| `API_V1_PREFIX` | Versioned API prefix | `/api/v1` |
+| `DATABASE_URL` | SQLAlchemy connection URL | `postgresql+psycopg://postgres:postgres@localhost:5432/job_application_tracker_api_db` |
+| `JWT_SECRET_KEY` | Token signing secret | Replace the example |
+| `JWT_ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `30` |
+| `CORS_ORIGINS` | Comma-separated browser origins | `http://localhost:3000,http://localhost:5173` |
+
+`.env` is ignored by Git. Never commit a production database URL or signing key.
+
+## PostgreSQL setup
+
+Using `psql`:
+
+```sql
+CREATE DATABASE job_application_tracker_api_db;
+CREATE USER job_tracker WITH PASSWORD 'replace-with-a-strong-password';
+GRANT ALL PRIVILEGES ON DATABASE job_application_tracker_api_db TO job_tracker;
+```
+
+Then set `DATABASE_URL` in `.env`:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://job_tracker:replace-with-a-strong-password@localhost:5432/job_application_tracker_api_db
+```
+
+For a simple local-only setup, the `.env.example` PostgreSQL superuser URL also matches the
+Docker Compose service.
+
+## Alembic migrations
+
+Apply all migrations:
 
 ```powershell
-alembic revision --autogenerate -m "add tickets table"
+python -m alembic upgrade head
 ```
 
-Downgrade one migration:
+Inspect migration state:
 
 ```powershell
-alembic downgrade -1
+python -m alembic current
+python -m alembic heads
+python -m alembic history
 ```
+
+Create a future autogeneration:
+
+```powershell
+python -m alembic revision --autogenerate -m "describe change"
+```
+
+The domain migration adds all tracker tables, enum constraints, relationships, and indexes. It
+also converts the original users primary key from its migration's `VARCHAR(36)` representation
+to PostgreSQL UUID before creating UUID foreign keys.
 
 ## Running the API
 
-PowerShell:
-
 ```powershell
-uvicorn app.main:app --reload
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload
 ```
 
 Open:
 
-- API root health: `http://localhost:8000/health`
-- Swagger: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- Health: [http://localhost:8000/health](http://localhost:8000/health)
 
-## Docker Usage
-
-Build and run the API with PostgreSQL:
+## Docker usage
 
 ```powershell
+Copy-Item .env.example .env
+docker compose config
 docker compose up --build
 ```
 
-Stop services:
+In another terminal:
+
+```powershell
+docker compose exec api python -m alembic upgrade head
+docker compose exec api python -m scripts.seed
+```
+
+Stop services while retaining PostgreSQL data:
 
 ```powershell
 docker compose down
 ```
 
-Run migrations inside the API container:
+Remove the local database volume only when its data is no longer needed:
 
 ```powershell
-docker compose exec api alembic upgrade head
+docker compose down --volumes
 ```
 
-The API is available at `http://localhost:8000`, and Swagger is available at `http://localhost:8000/docs`.
+## Running tests
 
-## Running Tests
-
-Tests use SQLite and do not touch the development PostgreSQL database.
+Tests use an isolated SQLite database and reset schema state for every test.
 
 ```powershell
-pytest
+python -m pytest
+python -m pytest tests\integration\test_applications.py
+python -m pytest -k status_transition
 ```
 
-## Linting and Formatting
+Test order is not significant.
+
+## Linting and type checking
 
 ```powershell
-ruff check .
-ruff format .
-mypy app
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy app
 ```
 
-Optional Make targets:
+To format locally:
 
 ```powershell
-make test
-make lint
-make format
-make typecheck
+python -m ruff format .
 ```
 
-## API Endpoints
+## Creating an administrator
 
-Health:
+```powershell
+python -m scripts.create_admin `
+  --email admin@localhost.test `
+  --password "Choose-A-Long-Random-Password" `
+  --name "Local Administrator"
+```
 
-- `GET /health`
-- `GET /api/v1/health`
-- `GET /api/v1/health/database`
+The script refuses to overwrite an existing account.
 
-Auth:
+## Seeding demo data
 
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/me`
+Run migrations first, then:
 
-Users:
+```powershell
+python -m scripts.seed
+```
 
-- `GET /api/v1/users`
-- `GET /api/v1/users/{user_id}`
-- `PATCH /api/v1/users/{user_id}`
-- `DELETE /api/v1/users/{user_id}`
+The seed is reasonably idempotent: it reuses users and recognizes its companies, contacts,
+applications, interviews, and notes. Statuses are built through the real workflow service, so
+demo history remains consistent.
 
-## Authentication Example
+Local development credentials:
+
+| Role | Email | Password |
+|---|---|---|
+| Administrator | `admin@example.com` | `DemoPassword123!` |
+| Normal user | `alice@example.com` | `DemoPassword123!` |
+| Normal user | `bob@example.com` | `DemoPassword123!` |
+
+These credentials are intentionally public and are **only for local development**. Never use
+them in staging or production.
+
+## API endpoint summary
+
+All business endpoints use `/api/v1`.
+
+| Group | Method and path |
+|---|---|
+| Authentication | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` |
+| Users | `GET /users`, `GET/PATCH/DELETE /users/{user_id}` |
+| Companies | `POST/GET /companies`, `GET/PATCH/DELETE /companies/{company_id}` |
+| Contacts | `POST/GET /companies/{company_id}/contacts`, `GET/PATCH/DELETE /contacts/{contact_id}` |
+| Applications | `POST/GET /applications`, `GET/PATCH /applications/{application_id}` |
+| Workflow | `PATCH /applications/{application_id}/status`, `PATCH /applications/{application_id}/archive` |
+| History | `GET /applications/{application_id}/history` |
+| Interviews | `POST/GET /applications/{application_id}/interviews`, `GET /interviews`, `GET/PATCH/DELETE /interviews/{interview_id}` |
+| Notes | `POST/GET /applications/{application_id}/notes`, `PATCH/DELETE /notes/{note_id}` |
+| Statistics | `GET /applications/statistics` |
+| Health | `GET /health`, `GET /api/v1/health`, `GET /api/v1/health/database` |
+
+## Filtering examples
+
+Applications support `status`, `priority`, `source`, `work_mode`, `employment_type`,
+`company_id`, date ranges, `is_archived`, search, sorting, and pagination:
+
+```http
+GET /api/v1/applications?status=APPLIED&priority=HIGH&page=1&page_size=20
+GET /api/v1/applications?q=backend&sort_by=deadline_at&sort_direction=asc
+GET /api/v1/applications?applied_from=2026-07-01T00:00:00Z&applied_to=2026-07-31T23:59:59Z
+GET /api/v1/applications?is_archived=false&work_mode=REMOTE
+```
+
+Company and interview examples:
+
+```http
+GET /api/v1/companies?q=fintech&industry=Software&page=1&page_size=10
+GET /api/v1/interviews?status=SCHEDULED&interview_type=TECHNICAL
+GET /api/v1/interviews?scheduled_from=2026-07-20T00:00:00Z&scheduled_to=2026-08-01T00:00:00Z
+```
+
+`created_by_id` is effective only for administrators. Invalid date ranges return
+`INVALID_DATE_RANGE`.
+
+## Authentication examples
 
 Register:
 
 ```powershell
-curl.exe -X POST "http://localhost:8000/api/v1/auth/register" `
-  -H "Content-Type: application/json" `
-  -d "{\"email\":\"user@example.com\",\"password\":\"StrongPassword123\",\"full_name\":\"Example User\"}"
+$registration = @{
+  email = "candidate@example.com"
+  password = "A-Strong-Password-123"
+  full_name = "Example Candidate"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8000/api/v1/auth/register" `
+  -ContentType "application/json" `
+  -Body $registration
 ```
 
-Log in:
+Log in and call an authenticated endpoint:
 
 ```powershell
-curl.exe -X POST "http://localhost:8000/api/v1/auth/login" `
-  -H "Content-Type: application/json" `
-  -d "{\"email\":\"user@example.com\",\"password\":\"StrongPassword123\"}"
+$login = @{
+  email = "candidate@example.com"
+  password = "A-Strong-Password-123"
+} | ConvertTo-Json
+
+$token = (Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8000/api/v1/auth/login" `
+  -ContentType "application/json" `
+  -Body $login).access_token
+
+$headers = @{ Authorization = "Bearer $token" }
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/applications" -Headers $headers
 ```
 
-Use the token:
+In Swagger UI, choose **Authorize** and paste the JWT token. The HTTP bearer security scheme
+adds it to subsequent requests.
+
+## Status update example
 
 ```powershell
-$token = "paste-access-token-here"
-curl.exe "http://localhost:8000/api/v1/auth/me" `
-  -H "Authorization: Bearer $token"
+$body = @{
+  status = "APPLIED"
+  note = "Submitted through the company careers page."
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Patch `
+  -Uri "http://localhost:8000/api/v1/applications/<application-id>/status" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
 ```
 
-## Creating an Admin
+Example business-rule error:
 
-After migrations have run:
-
-```powershell
-python scripts/create_admin.py --email admin@example.com --password StrongPassword123 --name "Admin User"
+```json
+{
+  "error": {
+    "code": "INVALID_APPLICATION_STATUS_TRANSITION",
+    "message": "Application cannot transition from DRAFT to OFFER"
+  }
+}
 ```
 
-Seed development users:
+## Statistics
 
-```powershell
-python scripts/seed.py
+`GET /api/v1/applications/statistics` returns status counts, upcoming interviews, weekly and
+monthly application totals, response rate, and offer rate. Normal users see only their own
+records. Administrators see global values unless they provide `created_by_id`.
+
+Response rate counts distinct applications whose history reached `HR_SCREEN` or a later
+interview/offer state, divided by current non-draft applications. Offer rate counts distinct
+applications whose history reached `OFFER`, using the same denominator.
+
+## GitHub Actions CI
+
+`.github/workflows/ci.yml` runs on pushes and pull requests to `main`. It installs Python 3.12
+dependencies and requires:
+
+```text
+ruff check .
+ruff format --check .
+mypy app
+pytest
 ```
 
-Seed data creates:
+The CI test database is SQLite; PostgreSQL behavior is represented by the Alembic migration and
+the Docker Compose development environment.
 
-- `admin@example.com` with password `StrongPassword123`
-- `user@example.com` with password `StrongPassword123`
+## Security notes
 
-Do not run seed scripts automatically in production.
+- Passwords are hashed with Argon2 and never returned by the API.
+- JWT secrets must be random, long, environment-specific, and stored outside source control.
+- Registration cannot create an administrator.
+- Ownership is enforced in services, not trusted from request filters.
+- Private notes are available only through the application owner boundary or to administrators.
+- Database exceptions and stack traces are replaced by stable JSON errors.
+- Configure narrow production CORS origins and disable debug mode.
+- Add TLS at the reverse proxy or platform boundary.
+- Rotate seeded credentials immediately if demo data is ever used outside an isolated machine.
 
-## Creating a New Project From the Template
+## Screenshots
 
-PowerShell:
+The repository keeps `docs/images/` ready for real captures. Replace the placeholders after
+starting the API; do not use fabricated screenshots.
 
-```powershell
-python scripts/create_project.py `
-  --name "TicketFlow API" `
-  --slug "ticketflow-api" `
-  --destination "../ticketflow-api"
-```
+### Swagger API Documentation
 
-The script copies the template, excludes local caches and `.env`, replaces template names, generates the copied `.env.example`, and refuses to overwrite a non-empty destination unless `--force` is provided.
+Placeholder: `docs/images/swagger-overview.png`
 
-## GitHub Actions
+### Application Endpoints
 
-CI runs on pushes to `main` and pull requests targeting `main`.
+Placeholder: `docs/images/application-endpoints.png`
 
-It performs:
+### Automated Test Results
 
-1. Dependency installation
-2. `ruff check .`
-3. `ruff format --check .`
-4. `mypy app`
-5. `pytest`
+Placeholder: `docs/images/test-results.png`
 
-The workflow uses SQLite for tests, so it does not require an external PostgreSQL service.
+## Suggested GitHub topics
 
-## Extending the Template
+`fastapi`, `python`, `postgresql`, `sqlalchemy`, `rest-api`, `jwt-authentication`, `docker`,
+`pytest`, `job-tracker`, `job-applications`, `backend`, `portfolio-project`
 
-To add a new domain, such as tickets:
+## Future improvements
 
-1. Add a SQLAlchemy model in `app/models/`.
-2. Import it in `app/database/models.py`.
-3. Add Pydantic schemas in `app/schemas/`.
-4. Add a repository in `app/repositories/`.
-5. Add business rules in `app/services/`.
-6. Add routes in `app/api/routes/`.
-7. Include the router in `app/api/router.py`.
-8. Create and apply an Alembic migration.
-9. Add unit and integration tests.
+- Refresh-token rotation and token revocation
+- Optional reminders and calendar integrations
+- Resume and cover-letter attachment metadata
+- Saved searches and configurable dashboard widgets
+- PostgreSQL-backed integration-test job in CI
+- Audit events for non-status edits
+- CSV import/export
+- Rate limiting and production observability
 
-## Future Improvements
+## License
 
-- Refresh tokens and token revocation
-- Rate limiting
-- Request ID middleware
-- Production metrics and tracing
-- Role and permission tables for larger products
-- Background task integration in project-specific forks
-- Deployment examples for common cloud platforms
-- Password reset and email verification flows
+See [LICENSE](LICENSE).

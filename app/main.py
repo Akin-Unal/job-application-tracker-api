@@ -15,6 +15,19 @@ configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+OPENAPI_TAGS = [
+    {"name": "Authentication", "description": "Registration, login, and current-user access."},
+    {"name": "Users", "description": "User and administrator account operations."},
+    {"name": "Companies", "description": "Companies in the job-search workspace."},
+    {"name": "Contacts", "description": "Recruiters, hiring managers, and referrals."},
+    {"name": "Applications", "description": "Job application pipeline management."},
+    {"name": "Application History", "description": "Immutable application status changes."},
+    {"name": "Interviews", "description": "Interview scheduling and outcomes."},
+    {"name": "Notes", "description": "Private application notes."},
+    {"name": "Statistics", "description": "Permission-aware job-search analytics."},
+    {"name": "Health", "description": "Service and database health checks."},
+]
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
@@ -25,11 +38,14 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title=settings.app_name,
+        title="Job Application Tracker API",
+        description="A production-style job application tracking REST API",
+        version="1.0.0",
         debug=settings.debug,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
+        openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
     )
     app.add_middleware(

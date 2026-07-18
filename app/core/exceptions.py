@@ -45,6 +45,50 @@ class BusinessRuleError(AppError):
     message = "Business rule violation"
 
 
+class CompanyNotFoundError(ResourceNotFoundError):
+    code = "COMPANY_NOT_FOUND"
+    message = "Company was not found"
+
+
+class CompanyAccessDeniedError(AuthorizationError):
+    code = "COMPANY_ACCESS_DENIED"
+    message = "You do not have access to this company"
+
+
+class ContactNotFoundError(ResourceNotFoundError):
+    code = "CONTACT_NOT_FOUND"
+    message = "Contact was not found"
+
+
+class ApplicationNotFoundError(ResourceNotFoundError):
+    code = "APPLICATION_NOT_FOUND"
+    message = "Application was not found"
+
+
+class ApplicationAccessDeniedError(AuthorizationError):
+    code = "APPLICATION_ACCESS_DENIED"
+    message = "You do not have access to this application"
+
+
+class InvalidApplicationStatusTransitionError(BusinessRuleError):
+    code = "INVALID_APPLICATION_STATUS_TRANSITION"
+
+
+class InterviewNotFoundError(ResourceNotFoundError):
+    code = "INTERVIEW_NOT_FOUND"
+    message = "Interview was not found"
+
+
+class NoteNotFoundError(ResourceNotFoundError):
+    code = "NOTE_NOT_FOUND"
+    message = "Application note was not found"
+
+
+class InvalidDateRangeError(BusinessRuleError):
+    code = "INVALID_DATE_RANGE"
+    message = "The start date must not be after the end date"
+
+
 def error_response(code: str, message: str, status_code: int) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,

@@ -31,7 +31,7 @@ docker-down:
 	docker compose down
 
 seed:
-	python scripts/seed.py
+	python -m scripts.seed
 
 create-admin:
-	python scripts/create_admin.py --email admin@example.com --password StrongPassword123 --name "Admin User"
+	python -m scripts.create_admin --email admin@example.com --password StrongPassword123 --name "Admin User"
