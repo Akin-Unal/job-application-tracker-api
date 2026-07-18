@@ -86,6 +86,20 @@ def normal_user(db_session: Session) -> User:
     return user
 
 
+@pytest.fixture
+def second_user(db_session: Session) -> User:
+    user = User(
+        email="second@example.com",
+        full_name="Second User",
+        hashed_password=hash_password("StrongPassword123"),
+        role=UserRole.USER,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
 def auth_header(client: TestClient, email: str, password: str) -> dict[str, str]:
     response = client.post(
         f"{get_settings().api_v1_prefix}/auth/login",
