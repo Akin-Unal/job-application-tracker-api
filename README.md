@@ -582,15 +582,26 @@ starting the API; do not use fabricated screenshots.
 
 ### Swagger API Documentation
 
-Placeholder: `docs/images/swagger-overview.png`
+The API exposes interactive OpenAPI documentation through Swagger UI.  
+Authentication is available through the JWT Bearer token flow.
+
+![Swagger API Documentation](docs/images/swagger-overview.png)
+
+---
 
 ### Application Endpoints
 
-Placeholder: `docs/images/application-endpoints.png`
+The application module includes endpoints for creating applications, listing applications, filtering, updating status, archiving, viewing history, and retrieving analytics.
+
+![Application Endpoints](docs/images/application-endpoints.png)
+
+---
 
 ### Automated Test Results
 
-Placeholder: `docs/images/test-results.png`
+The project includes automated tests for authentication, companies, contacts, applications, workflow transitions, interviews, notes, statistics, and authorization rules.
+
+![Automated Test Results](docs/images/test-results.png)
 
 ## Suggested GitHub topics
 
