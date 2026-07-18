@@ -17,6 +17,34 @@ it difficult to answer basic questions: Which applications need attention? What 
 next? How often do applications receive a response? This API models that information as a
 permission-aware pipeline with immutable status history and useful aggregate metrics.
 
+## Screenshots
+
+The repository keeps `docs/images/` ready for real captures. Replace the placeholders after
+starting the API; do not use fabricated screenshots.
+
+### Swagger API Documentation
+
+The API exposes interactive OpenAPI documentation through Swagger UI.  
+Authentication is available through the JWT Bearer token flow.
+
+![Swagger API Documentation](docs/images/swagger-overview.png)
+
+---
+
+### Application Endpoints
+
+The application module includes endpoints for creating applications, listing applications, filtering, updating status, archiving, viewing history, and retrieving analytics.
+
+![Application Endpoints](docs/images/application-endpoints.png)
+
+---
+
+### Automated Test Results
+
+The project includes automated tests for authentication, companies, contacts, applications, workflow transitions, interviews, notes, statistics, and authorization rules.
+
+![Automated Test Results](docs/images/test-results.png)
+
 ## Main features
 
 - JWT registration, login, current-user access, and Swagger authorization
@@ -575,39 +603,6 @@ the Docker Compose development environment.
 - Add TLS at the reverse proxy or platform boundary.
 - Rotate seeded credentials immediately if demo data is ever used outside an isolated machine.
 
-## Screenshots
-
-The repository keeps `docs/images/` ready for real captures. Replace the placeholders after
-starting the API; do not use fabricated screenshots.
-
-### Swagger API Documentation
-
-The API exposes interactive OpenAPI documentation through Swagger UI.  
-Authentication is available through the JWT Bearer token flow.
-
-![Swagger API Documentation](docs/images/swagger-overview.png)
-
----
-
-### Application Endpoints
-
-The application module includes endpoints for creating applications, listing applications, filtering, updating status, archiving, viewing history, and retrieving analytics.
-
-![Application Endpoints](docs/images/application-endpoints.png)
-
----
-
-### Automated Test Results
-
-The project includes automated tests for authentication, companies, contacts, applications, workflow transitions, interviews, notes, statistics, and authorization rules.
-
-![Automated Test Results](docs/images/test-results.png)
-
-## Suggested GitHub topics
-
-`fastapi`, `python`, `postgresql`, `sqlalchemy`, `rest-api`, `jwt-authentication`, `docker`,
-`pytest`, `job-tracker`, `job-applications`, `backend`, `portfolio-project`
-
 ## Future improvements
 
 - Refresh-token rotation and token revocation
@@ -618,7 +613,3 @@ The project includes automated tests for authentication, companies, contacts, ap
 - Audit events for non-status edits
 - CSV import/export
 - Rate limiting and production observability
-
-## License
-
-See [LICENSE](LICENSE).
