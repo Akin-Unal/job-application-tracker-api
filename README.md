@@ -349,7 +349,7 @@ Open:
 ```powershell
 Copy-Item .env.example .env
 docker compose config
-docker compose up --build
+docker compose up -d --build
 ```
 
 In another terminal:
