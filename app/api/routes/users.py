@@ -12,7 +12,7 @@ from app.schemas.user import UserRead, UserUpdate
 from app.services.user_service import UserService
 from app.utils.pagination import PaginationParams, get_pagination_params
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.get(

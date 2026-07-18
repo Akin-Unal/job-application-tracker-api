@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies.database import get_database_session
 from app.core.config import get_settings
 
-router = APIRouter(tags=["health"])
+router = APIRouter(tags=["Health"])
 
 
 @router.get(
